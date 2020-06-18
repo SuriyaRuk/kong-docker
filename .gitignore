@@ -2,3 +2,7 @@
 *_data
 cassandra_db
 data
+plugins/oauth_introspection/
+pg_data
+proxy_pg_data
+mongo_data

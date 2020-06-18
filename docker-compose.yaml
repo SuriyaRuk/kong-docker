@@ -7,8 +7,25 @@ services:
     environment:
       - POSTGRES_USER=kong
       - POSTGRES_DB=kong
+      - POSTGRES_HOST_AUTH_METHOD=trust
     volumes:
       - ./pg_data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  proxy-database:
+    image: postgres:9.6
+    container_name: proxy-database
+    environment:
+      - POSTGRES_USER=kong
+      - POSTGRES_DB=kong
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    volumes:
+      - ./proxy_pg_data:/var/lib/postgresql/data
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -24,13 +41,23 @@ services:
     environment:
       - KONG_DATABASE=postgres
       - KONG_PG_HOST=kong-database
-    command: kong migrations bootstrap -v
+    command: kong migrations bootstrap -v 
 
-  kong:
+  proxy-migrations:
+    depends_on:
+      - proxy-database
+    image: kong:latest
+    container_name: proxy-migrations
+    environment:
+      - KONG_DATABASE=postgres
+      - KONG_PG_HOST=proxy-database
+    command: kong migrations bootstrap -v 
+
+  kong1:
     depends_on:
       - kong-database
     image: kong:latest
-    container_name: kong
+    container_name: kong1
     restart: always
     environment:
       - KONG_DATABASE=postgres
@@ -41,15 +68,63 @@ services:
       - KONG_ADMIN_ERROR_LOG=/dev/stderr
       - KONG_TRUSTED_IPS=0.0.0.0/0,::/0
       - KONG_REAL_IP_RECURSIVE=on
-      - KONG_PLUGINS=bundled,hello
-      - KONG_LUA_PACKAGE_PATH=/etc/kong/plugins/hello/?.lua;;
+      - KONG_PLUGINS=bundled,hello,oauth_introspection
+      - KONG_LUA_PACKAGE_PATH=/etc/kong/plugins/hello/?.lua;/etc/kong/plugins/oauth_introspection/?.lua;;
       - KONG_LOG_LEVEL=debug
     volumes:
       - ./plugins/hello:/etc/kong/plugins/hello
+      - ./plugins/oauth_introspection:/etc/kong/plugins/oauth_introspection
     ports:
-      - 80:8000
+      - 81:8000
       - 8001:8001
       - 443:8443
+
+  kong2:
+    depends_on:
+      - kong-database
+    image: kong:latest
+    container_name: kong2
+    restart: always
+    environment:
+      - KONG_DATABASE=postgres
+      - KONG_PG_HOST=kong-database
+      - KONG_ADMIN_LISTEN=0.0.0.0:8001
+      - KONG_NGINX_HTTP_RESOLVER=8.8.8.8
+      - KONG_PROXY_ERROR_LOG=/dev/stderr
+      - KONG_ADMIN_ERROR_LOG=/dev/stderr
+      - KONG_TRUSTED_IPS=0.0.0.0/0,::/0
+      - KONG_REAL_IP_RECURSIVE=on
+      - KONG_PLUGINS=bundled,hello,oauth_introspection
+      - KONG_LUA_PACKAGE_PATH=/etc/kong/plugins/hello/?.lua;/etc/kong/plugins/oauth_introspection/?.lua;;
+      - KONG_LOG_LEVEL=debug
+    volumes:
+      - ./plugins/hello:/etc/kong/plugins/hello
+      - ./plugins/oauth_introspection:/etc/kong/plugins/oauth_introspection
+    ports:
+      - 82:8000
+      - 8002:8001
+      - 444:8443
+
+  proxy:
+    depends_on:
+      - proxy-database
+    image: kong:latest
+    container_name: proxy
+    restart: always
+    environment:
+      - KONG_DATABASE=postgres
+      - KONG_PG_HOST=proxy-database
+      - KONG_ADMIN_LISTEN=0.0.0.0:8001
+      - KONG_NGINX_HTTP_RESOLVER=8.8.8.8
+      - KONG_PROXY_ERROR_LOG=/dev/stderr
+      - KONG_ADMIN_ERROR_LOG=/dev/stderr
+      - KONG_TRUSTED_IPS=0.0.0.0/0,::/0
+      - KONG_REAL_IP_RECURSIVE=on
+      - KONG_LOG_LEVEL=debug
+    ports:
+      - 80:8000
+      - 8003:8001
+      - 445:8443
 
   mongo:
     image: mongo
